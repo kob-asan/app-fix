@@ -1,0 +1,65 @@
+name: DMG から Steam.app を抽出・修復
+
+on: workflow_dispatch
+
+jobs:
+  extract-and-fix:
+    runs-on: macos-latest
+    
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+      
+      - name: DMG をマウント・抽出
+        run: |
+          # DMG をマウント
+          hdiutil attach steam.dmg -nobrowse -noverify -noautoopen
+          
+          # マウント先を確認
+          ls /Volumes/
+          
+          # Steam.app をコピー
+          cp -pR /Volumes/Steam/Steam.app .
+          
+          # アンマウント
+          hdiutil detach /Volumes/Steam
+          
+          echo "✓ 抽出完了"
+      
+      - name: Steam.app を修復
+        run: |
+          echo "修復ステップ1: xattr を除去"
+          xattr -d com.apple.provenance Steam.app 2>/dev/null || true
+          find Steam.app -exec xattr -d com.apple.provenance {} \; 2>/dev/null || true
+          
+          echo "修復ステップ2: Breakpad.framework のシンボリックリンクを修復"
+          cd Steam.app/Contents/Frameworks/Breakpad.framework/Versions/
+          
+          rm -rf Current 2>/dev/null || true
+          ln -s A Current
+          
+          cd ..
+          rm -rf Headers Resources 2>/dev/null || true
+          ln -s Versions/Current/Headers Headers
+          ln -s Versions/Current/Resources Resources
+          
+          echo "✓ Breakpad.framework 修復完了"
+      
+      - name: 実行権限を復元
+        run: |
+          chmod +x Steam.app/Contents/MacOS/steam_osx
+          chmod +x Steam.app/Contents/MacOS/steam.sh
+          find Steam.app/Contents/MacOS -type f -exec chmod +x {} \;
+          echo "✓ 権限設定完了"
+      
+      - name: 修復済みZip を作成
+        run: |
+          zip -r Steam.app_FIXED.zip Steam.app
+          ls -lh Steam.app_FIXED.zip
+      
+      - name: アーティファクトとしてアップロード
+        uses: actions/upload-artifact@v4
+        with:
+          name: Steam-app-fixed
+          path: Steam.app_FIXED.zip
+          retention-days: 7
